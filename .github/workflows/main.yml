@@ -3,27 +3,25 @@ name: 'ci'
 on:
   push:
     branches:
-    - main
+      - main
 
 jobs:
   deploy-secrets:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v3
-      - 
-        id: 'auth'
+      - id: 'auth'
         name: 'Authenticate to Google Cloud'
         uses: 'google-github-actions/auth@v1'
         with:
           token_format: 'access_token'
           credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
-      - 
-        name: Setup Go
+      - name: Setup Go
         uses: actions/setup-go@v4
         with:
           go-version: '>=1.21'
-      - 
-        name: Deploy Secrets
+      - name: Deploy Secrets
+        env:
+          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
         run: go run main.go

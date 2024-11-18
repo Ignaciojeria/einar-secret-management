@@ -19,7 +19,7 @@ func init() {
 
 func pushEinarSecrets() {
 	secretKeys := []string{
-		"EINAR_GEMINI_API_KEY",
+		"GEMINI_API_KEY",
 	}
 
 	projectID := "einar-404623"
