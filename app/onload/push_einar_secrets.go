@@ -4,20 +4,25 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	ioc "github.com/Ignaciojeria/einar-ioc/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func init() {
 	ioc.Registry(pushEinarSecrets)
 }
-func pushEinarSecrets() {
-	// GCP project in which to store secrets in Secret Manager.
-	projectID := "einar-404623"
 
-	// Create the client.
+func pushEinarSecrets() {
+	secretKeys := []string{
+		"EINAR_GEMINI_API_KEY",
+	}
+
+	projectID := "einar-404623"
 	ctx := context.Background()
 	client, err := secretmanager.NewClient(ctx)
 	if err != nil {
@@ -25,55 +30,51 @@ func pushEinarSecrets() {
 	}
 	defer client.Close()
 
-	// Create the request to create the secret.
-	createSecretReq := &secretmanagerpb.CreateSecretRequest{
-		Parent:   fmt.Sprintf("projects/%s", projectID),
-		SecretId: "my-secret",
-		Secret: &secretmanagerpb.Secret{
-			Replication: &secretmanagerpb.Replication{
-				Replication: &secretmanagerpb.Replication_Automatic_{
-					Automatic: &secretmanagerpb.Replication_Automatic{},
+	for _, key := range secretKeys {
+		secretValue := os.Getenv(key)
+		if secretValue == "" {
+			log.Printf("Warning: Secret %s is not set", key)
+			continue
+		}
+
+		secretID := key
+
+		createSecretReq := &secretmanagerpb.CreateSecretRequest{
+			Parent:   fmt.Sprintf("projects/%s", projectID),
+			SecretId: secretID,
+			Secret: &secretmanagerpb.Secret{
+				Replication: &secretmanagerpb.Replication{
+					Replication: &secretmanagerpb.Replication_Automatic_{
+						Automatic: &secretmanagerpb.Replication_Automatic{},
+					},
 				},
 			},
-		},
+		}
+
+		secret, err := client.CreateSecret(ctx, createSecretReq)
+		if err != nil {
+			if status.Code(err) == codes.AlreadyExists {
+				log.Printf("Secret %s already exists, adding a new version", secretID)
+				secret = &secretmanagerpb.Secret{
+					Name: fmt.Sprintf("projects/%s/secrets/%s", projectID, secretID),
+				}
+			} else {
+				log.Fatalf("failed to create secret %s: %v", secretID, err)
+			}
+		}
+
+		addSecretVersionReq := &secretmanagerpb.AddSecretVersionRequest{
+			Parent: secret.Name,
+			Payload: &secretmanagerpb.SecretPayload{
+				Data: []byte(secretValue),
+			},
+		}
+
+		_, err = client.AddSecretVersion(ctx, addSecretVersionReq)
+		if err != nil {
+			log.Fatalf("failed to add secret version for %s: %v", secretID, err)
+		}
+
+		log.Printf("Secret %s added successfully", secretID)
 	}
-
-	secret, err := client.CreateSecret(ctx, createSecretReq)
-	if err != nil {
-		log.Fatalf("failed to create secret: %v", err)
-	}
-
-	// Declare the payload to store.
-	payload := []byte("my super secret data")
-
-	// Build the request.
-	addSecretVersionReq := &secretmanagerpb.AddSecretVersionRequest{
-		Parent: secret.Name,
-		Payload: &secretmanagerpb.SecretPayload{
-			Data: payload,
-		},
-	}
-
-	// Call the API.
-	version, err := client.AddSecretVersion(ctx, addSecretVersionReq)
-	if err != nil {
-		log.Fatalf("failed to add secret version: %v", err)
-	}
-
-	// Build the request.
-	accessRequest := &secretmanagerpb.AccessSecretVersionRequest{
-		Name: version.Name,
-	}
-
-	// Call the API.
-	result, err := client.AccessSecretVersion(ctx, accessRequest)
-	if err != nil {
-		log.Fatalf("failed to access secret version: %v", err)
-	}
-
-	// Print the secret payload.
-	//
-	// WARNING: Do not print the secret in a production environment - this
-	// snippet is showing how to access the secret material.
-	log.Printf("Plaintext: %s", result.Payload.Data)
 }
